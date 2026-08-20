@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getDemoScraperRuns } from '@/lib/demo-data';
+import { fetchScraperRuns } from '@/lib/db';
 
 export async function GET() {
   try {
-    const runs = getDemoScraperRuns();
+    const runs = await fetchScraperRuns();
     return NextResponse.json({ runs });
   } catch (error) {
     console.error('[API /scraper/runs] Error:', error);

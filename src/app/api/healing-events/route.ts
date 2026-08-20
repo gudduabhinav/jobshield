@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getDemoHealingEvents } from '@/lib/demo-data';
+import { fetchHealingEvents } from '@/lib/db';
 
 export async function GET() {
   try {
-    const events = getDemoHealingEvents();
+    const events = await fetchHealingEvents();
     return NextResponse.json({ events });
   } catch (error) {
     console.error('[API /healing-events] Error:', error);

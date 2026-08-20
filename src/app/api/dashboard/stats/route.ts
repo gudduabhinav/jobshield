@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getDashboardStats } from '@/lib/demo-data';
+import { fetchDashboardStats } from '@/lib/db';
 
 export async function GET() {
   try {
-    const stats = getDashboardStats();
+    const stats = await fetchDashboardStats();
     return NextResponse.json(stats);
   } catch (error) {
     console.error('[API /dashboard/stats] Error:', error);
