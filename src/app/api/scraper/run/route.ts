@@ -18,13 +18,12 @@ interface ProcessedJob {
   scraped_at: string;
   risk_score: number;
   risk_level: RiskLevel;
-  risk_reasons: string[];
-  status: string;
+  risk_reasons: { ruleId: string; name: string; weight: number; description: string }[];
 }
 
 function generateJobId(job: LiveJob): string {
-  const hash = `${job.source}-${job.company}-${job.title}`.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
-  return hash.substring(0, 60);
+  const slug = `${job.source}-${job.url}`.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return slug.substring(0, 80) || `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 async function processLiveJob(job: LiveJob): Promise<ProcessedJob> {
@@ -53,8 +52,7 @@ async function processLiveJob(job: LiveJob): Promise<ProcessedJob> {
     scraped_at: new Date().toISOString(),
     risk_score: risk.score,
     risk_level: risk.level,
-    risk_reasons: risk.reasons.map((r) => r.description),
-    status: "active",
+    risk_reasons: risk.reasons,
   };
 }
 
@@ -93,19 +91,18 @@ export async function POST() {
 
     let insertedCount = 0;
     let skippedCount = 0;
-    const batchSize = 50;
 
-    for (let i = 0; i < processedJobs.length; i += batchSize) {
-      const batch = processedJobs.slice(i, i + batchSize);
-      const { error: insertError } = await db.from('jobs').upsert(batch, {
-        onConflict: 'id',
-        ignoreDuplicates: true,
-      });
+    for (const job of processedJobs) {
+      const { error: insertError } = await db.from('jobs').insert(job);
       if (insertError) {
-        console.error(`[Scraper Run] Batch insert error at offset ${i}:`, insertError);
-        skippedCount += batch.length;
+        if (insertError.code === '23505') {
+          skippedCount++;
+        } else {
+          console.error(`[Scraper Run] Insert error for "${job.title}" (${job.source_name}):`, insertError.code, insertError.message);
+          skippedCount++;
+        }
       } else {
-        insertedCount += batch.length;
+        insertedCount++;
       }
     }
 

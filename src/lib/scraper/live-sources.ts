@@ -69,7 +69,11 @@ function stripHtml(html: string): string {
 }
 
 function cleanDescription(desc: string): string {
-  const cleaned = stripHtml(desc);
+  const cleaned = stripHtml(desc)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .replace(/[^\x20-\x7E\u00A0-\u00FF\u0100-\u017F\u0180-\u024F\u0400-\u04FF\u2000-\u206F\u2190-\u21FF]/g, '')
+    .normalize('NFC')
+    .trim();
   return cleaned.length > 2000 ? cleaned.substring(0, 2000) + "..." : cleaned;
 }
 
@@ -136,16 +140,22 @@ export async function fetchArbeitnow(limit: number = 100): Promise<LiveJob[]> {
     return jobs
       .filter((job) => job.title && job.company_name)
       .slice(0, limit)
-      .map((job) => ({
-        title: job.title,
-        company: job.company_name,
-        location: job.location || (job.remote ? "Remote" : "Not specified"),
-        description: cleanDescription(job.description || ""),
-        url: job.url || `https://www.arbeitnow.com/job/${job.id}`,
-        source: "arbeitnow",
-        tags: job.tags || [],
-        date: job.created_at || new Date().toISOString(),
-      }));
+      .map((job) => {
+        let dateStr = job.created_at || new Date().toISOString();
+        if (typeof job.created_at === "number") {
+          dateStr = new Date(job.created_at * 1000).toISOString();
+        }
+        return {
+          title: job.title,
+          company: job.company_name,
+          location: job.location || (job.remote ? "Remote" : "Not specified"),
+          description: cleanDescription(job.description || ""),
+          url: job.url || `https://www.arbeitnow.com/job/${job.id}`,
+          source: "arbeitnow",
+          tags: job.tags || [],
+          date: dateStr,
+        };
+      });
   } catch (error) {
     console.error("Arbeitnow fetch failed:", error);
     return [];
