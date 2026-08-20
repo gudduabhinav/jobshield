@@ -209,7 +209,7 @@ export async function fetchHealingEvents() {
 }
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
-  const { data: jobs, count: totalJobs } = await db.from('jobs').select('*', { count: 'exact' });
+  const { count: totalJobs } = await db.from('jobs').select('*', { count: 'exact' });
   const { count: lowRisk } = await db.from('jobs').select('*', { count: 'exact' }).eq('risk_level', 'LOW');
   const { count: mediumRisk } = await db.from('jobs').select('*', { count: 'exact' }).eq('risk_level', 'MEDIUM');
   const { count: highRisk } = await db.from('jobs').select('*', { count: 'exact' }).eq('risk_level', 'HIGH');
@@ -217,25 +217,33 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
   const { data: health } = await db.from('scraper_health').select('*').order('created_at', { ascending: false }).limit(1).single();
   const { count: healingEvents } = await db.from('healing_events').select('*', { count: 'exact' });
 
+  const { data: recentRuns } = await db.from('scraper_runs')
+    .select('started_at, valid_records')
+    .order('started_at', { ascending: false })
+    .limit(14);
+
   const nowMs = Date.now();
   const jobsOverTime = Array.from({ length: 14 }, (_, i) => {
     const date = new Date();
     date.setDate(date.getDate() - (13 - i));
+    const dayStr = date.toISOString().split('T')[0];
+    const matchingRuns = (recentRuns || []).filter((r) => {
+      const runDate = new Date(r.started_at).toISOString().split('T')[0];
+      return runDate === dayStr;
+    });
+    const count = matchingRuns.reduce((sum, r) => sum + Number(r.valid_records || 0), 0);
     return {
       date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      count: Math.floor(80 + Math.random() * 30 + i * 3),
+      count: count || (totalJobs ? Math.floor(totalJobs / 14) : 0),
     };
   });
 
   const extractionQuality = Array.from({ length: 14 }, (_, i) => {
     const date = new Date();
     date.setDate(date.getDate() - (13 - i));
-    let quality = 96 + Math.random() * 4;
-    if (i === 5) quality = 12;
-    if (i === 6) quality = 89;
     return {
       date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      quality: Math.round(quality * 10) / 10,
+      quality: health ? Number(health.extraction_quality) : 0,
     };
   });
 
@@ -244,7 +252,7 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
     lowRisk: lowRisk || 0,
     mediumRisk: mediumRisk || 0,
     highRisk: highRisk || 0,
-    scraperStatus: (health?.status || 'HEALTHY') as DashboardStats['scraperStatus'],
+    scraperStatus: (health?.status || 'IDLE') as DashboardStats['scraperStatus'],
     lastSuccessfulRun: health?.last_successful_run || new Date(nowMs - 300000).toISOString(),
     healingEvents: healingEvents || 0,
     recoveryRate: health ? Number(health.recovery_rate) : 100,

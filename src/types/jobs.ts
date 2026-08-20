@@ -1,5 +1,5 @@
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
-export type ScraperStatus = 'HEALTHY' | 'DEGRADED' | 'FAILED' | 'HEALING' | 'RECOVERED';
+export type ScraperStatus = 'HEALTHY' | 'DEGRADED' | 'FAILED' | 'HEALING' | 'RECOVERED' | 'IDLE';
 export type HealingStatus = 'detected' | 'healing' | 'recovered' | 'failed';
 export type ScraperRunStatus = 'running' | 'completed' | 'failed';
 
