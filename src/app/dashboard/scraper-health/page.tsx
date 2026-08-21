@@ -6,8 +6,9 @@ import { ScraperStatusBadge } from '@/components/dashboard/scraper-status-badge'
 import { ScraperHealth, ScraperRun } from '@/types/scraper';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
-import { Activity, Clock, BarChart3, Play, RefreshCw, Loader2 } from 'lucide-react';
+import { Activity, Clock, BarChart3, Play, RefreshCw, Loader2, Globe, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 export default function ScraperHealthPage() {
   const [health, setHealth] = useState<ScraperHealth | null>(null);
@@ -15,6 +16,9 @@ export default function ScraperHealthPage() {
   const [loading, setLoading] = useState(true);
   const [scraping, setScraping] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);
+  const [customUrl, setCustomUrl] = useState('');
+  const [customScraping, setCustomScraping] = useState(false);
+  const [customResult, setCustomResult] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -55,6 +59,30 @@ export default function ScraperHealthPage() {
     }
   };
 
+  const runCustomScrape = async () => {
+    if (!customUrl.trim()) return;
+    setCustomScraping(true);
+    setCustomResult(null);
+    try {
+      const res = await fetch('/api/scraper/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: customUrl.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCustomResult(`Scraped ${data.pageTitle} — Found ${data.stats.totalFound} items using ${data.method} method. Inserted ${data.stats.inserted} into database. High risk: ${data.stats.highRisk}`);
+        await fetchData();
+      } else {
+        setCustomResult(`Error: ${data.error} — ${data.details || ''}`);
+      }
+    } catch (e) {
+      setCustomResult(`Network error: ${e instanceof Error ? e.message : 'Unknown'}`);
+    } finally {
+      setCustomScraping(false);
+    }
+  };
+
   if (loading && !health) {
     return (
       <div className="space-y-6">
@@ -68,7 +96,7 @@ export default function ScraperHealthPage() {
 
   const fieldEntries = health ? Object.entries(health.fieldCompleteness) : [];
   const statusMessages: Record<string, string> = {
-    IDLE: 'Scraper has not run yet. Click "Run Live Scraper" to fetch real job data.',
+    IDLE: 'Scraper has not run yet. Click a button below to start scraping.',
     HEALTHY: 'The collector is operating normally. Data extraction is performing as expected.',
     DEGRADED: 'The collector is experiencing some issues. Some fields may have reduced completeness.',
     FAILED: 'The collector has failed. Data extraction is not producing valid results.',
@@ -82,52 +110,116 @@ export default function ScraperHealthPage() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Activity className="h-6 w-6 text-emerald-500" />
-            Scraper Health
+            Scraper Control
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Monitor live data collection and extraction quality
+            Scrape any public website or fetch jobs from live sources
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button
-            onClick={fetchData}
-            variant="outline"
-            size="sm"
-            disabled={loading || scraping}
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-          <Button
-            onClick={runScraper}
-            size="sm"
-            disabled={scraping}
-            className="bg-emerald-600 hover:bg-emerald-700"
-          >
-            {scraping ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Scraping...
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 mr-2" />
-                Run Live Scraper
-              </>
-            )}
-          </Button>
-        </div>
+        <Button onClick={fetchData} variant="outline" size="sm" disabled={loading || scraping || customScraping}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
       </div>
 
-      {lastResult && (
-        <Card className={lastResult.startsWith('Error') || lastResult.startsWith('Network') ? 'border-red-500/50' : 'border-emerald-500/50'}>
-          <CardContent className="py-3">
-            <p className={`text-sm ${lastResult.startsWith('Error') || lastResult.startsWith('Network') ? 'text-red-400' : 'text-emerald-400'}`}>
+      {/* Custom URL Scraper */}
+      <Card className="border-emerald-500/30">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Globe className="h-4 w-4 text-emerald-500" />
+            Scrape Any Public Website
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-4">
+            Enter any public URL — the scraper will fetch the page, extract job listings, score risk, and store in database.
+          </p>
+          <div className="flex gap-2">
+            <Input
+              placeholder="https://example.com/jobs  or  greenhouse.io/jobs or linkedin.com/jobs/..."
+              value={customUrl}
+              onChange={(e) => setCustomUrl(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && runCustomScrape()}
+              disabled={customScraping}
+              className="flex-1"
+            />
+            <Button
+              onClick={runCustomScrape}
+              disabled={!customUrl.trim() || customScraping}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {customScraping ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Scraping...
+                </>
+              ) : (
+                <>
+                  <Globe className="h-4 w-4 mr-2" />
+                  Scrape URL
+                </>
+              )}
+            </Button>
+          </div>
+          {customResult && (
+            <div className={`mt-3 p-3 rounded-lg text-sm ${customResult.startsWith('Error') ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+              {customResult}
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="text-xs text-muted-foreground">Try:</span>
+            {['boards.greenhouse.io', 'jobs.lever.co', 'builtin.com/jobs', 'wellfound.com/roles'].map(suggestion => (
+              <button
+                key={suggestion}
+                onClick={() => setCustomUrl(`https://${suggestion}`)}
+                className="text-xs text-emerald-500 hover:text-emerald-400 underline underline-offset-2"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Bulk Live Sources */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Play className="h-4 w-4 text-emerald-500" />
+            Bulk Scrape — All Sources
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm">Fetch jobs from RemoteOK, Remotive, and Arbeitnow in one click.</p>
+              <p className="text-xs text-muted-foreground mt-1">~200 real jobs from 3 live sources</p>
+            </div>
+            <Button
+              onClick={runScraper}
+              disabled={scraping || customScraping}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {scraping ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Scraping...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4 mr-2" />
+                  Run Bulk Scrape
+                </>
+              )}
+            </Button>
+          </div>
+          {lastResult && (
+            <div className={`mt-3 p-3 rounded-lg text-sm ${lastResult.startsWith('Error') ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
               {lastResult}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {health && (
         <>
@@ -217,19 +309,19 @@ export default function ScraperHealthPage() {
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <Clock className="h-4 w-4" />
-            Recent Runs
+            Scrape History
           </CardTitle>
         </CardHeader>
         <CardContent>
           {runs.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
-              No runs yet. Click &quot;Run Live Scraper&quot; to fetch real job data from live sources.
+              No runs yet. Scrape a URL or run the bulk scraper above.
             </p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Run ID</TableHead>
+                  <TableHead>Source</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="hidden md:table-cell">Records</TableHead>
                   <TableHead className="hidden md:table-cell">Quality</TableHead>
@@ -239,7 +331,7 @@ export default function ScraperHealthPage() {
               <TableBody>
                 {runs.map((run) => (
                   <TableRow key={run.id}>
-                    <TableCell className="font-mono text-xs">{run.id}</TableCell>
+                    <TableCell className="font-mono text-xs">{run.collectorId}</TableCell>
                     <TableCell>
                       <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${
                         run.status === 'completed' ? 'text-emerald-500' : run.status === 'failed' ? 'text-red-500' : 'text-amber-500'
