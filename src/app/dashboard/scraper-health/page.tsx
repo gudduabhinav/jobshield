@@ -6,7 +6,7 @@ import { ScraperStatusBadge } from '@/components/dashboard/scraper-status-badge'
 import { ScraperHealth, ScraperRun } from '@/types/scraper';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
-import { Activity, Clock, BarChart3, RefreshCw, Loader2, Globe, Shield, Zap, AlertTriangle, CheckCircle2, XCircle, ArrowRight } from 'lucide-react';
+import { Activity, Clock, BarChart3, RefreshCw, Loader2, Globe, Shield, Zap, AlertTriangle, CheckCircle2, XCircle, ArrowRight, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -47,6 +47,22 @@ interface ScrapeResult {
   attempts: AttemptInfo[];
   healingEvents: HealingInfo[];
   sample: Array<{ title: string; company: string; location: string }>;
+}
+
+interface BrightDataResult {
+  message: string;
+  url: string;
+  collectorId: string;
+  succeeded: boolean;
+  stats: {
+    totalFound: number;
+    inserted: number;
+    skipped: number;
+    highRisk: number;
+    healingEvents: number;
+    processingTimeMs: number;
+  };
+  sample: Array<{ title: string; company: string; url: string }>;
 }
 
 export default function ScraperHealthPage() {
@@ -103,6 +119,150 @@ export default function ScraperHealthPage() {
       });
     } finally {
       setScraping(false);
+    }
+  };
+
+  const [bdScraping, setBdScraping] = useState(false);
+  const [bdResult, setBdResult] = useState<BrightDataResult | null>(null);
+  const [bdStatus, setBdStatus] = useState<'idle' | 'triggering' | 'polling' | 'done' | 'failed'>('idle');
+  const [healMode, setHealMode] = useState(false);
+  const [healDesc, setHealDesc] = useState('');
+  const [healing, setHealing] = useState(false);
+
+  const runBrightDataScrape = async () => {
+    if (!customUrl.trim()) return;
+    setBdScraping(true);
+    setBdResult(null);
+    setBdStatus('triggering');
+
+    try {
+      // Step 1: Trigger
+      const triggerRes = await fetch('/api/scraper/brightdata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: customUrl.trim() }),
+      });
+      const triggerData = await triggerRes.json();
+
+      if (!triggerData.success) {
+        setBdResult({
+          message: triggerData.error || 'Trigger failed',
+          url: customUrl,
+          collectorId: '',
+          succeeded: false,
+          stats: { totalFound: 0, inserted: 0, skipped: 0, highRisk: 0, healingEvents: 0, processingTimeMs: 0 },
+          sample: [],
+        });
+        setBdStatus('failed');
+        setBdScraping(false);
+        return;
+      }
+
+      setBdStatus('polling');
+      const collectionId = triggerData.collectionId;
+
+      // Step 2: Poll for results
+      let attempts = 0;
+      const maxAttempts = 120; // 10 minutes max
+
+      const poll = async (): Promise<boolean> => {
+        if (attempts >= maxAttempts) {
+          setBdResult({
+            message: 'Timed out waiting for results',
+            url: customUrl,
+            collectorId: collectionId,
+            succeeded: false,
+            stats: { totalFound: 0, inserted: 0, skipped: 0, highRisk: 0, healingEvents: 0, processingTimeMs: 0 },
+            sample: [],
+          });
+          setBdStatus('failed');
+          return false;
+        }
+
+        attempts++;
+        await new Promise(r => setTimeout(r, 5000));
+
+        try {
+          const pollRes = await fetch(`/api/scraper/brightdata/poll?id=${collectionId}&url=${encodeURIComponent(customUrl.trim())}`);
+          const pollData = await pollRes.json();
+
+          if (pollData.status === 'done') {
+            setBdResult({
+              message: `Scraped ${pollData.totalFound} jobs`,
+              url: customUrl,
+              collectorId: collectionId,
+              succeeded: true,
+              stats: {
+                totalFound: pollData.totalFound,
+                inserted: pollData.inserted,
+                skipped: pollData.skipped,
+                highRisk: pollData.highRisk,
+                healingEvents: 0,
+                processingTimeMs: attempts * 5000,
+              },
+              sample: pollData.sample || [],
+            });
+            setBdStatus('done');
+            await fetchData();
+            return true;
+          }
+
+          if (pollData.status === 'failed') {
+            setBdResult({
+              message: pollData.error || 'Scraper failed',
+              url: customUrl,
+              collectorId: collectionId,
+              succeeded: false,
+              stats: { totalFound: 0, inserted: 0, skipped: 0, highRisk: 0, healingEvents: 0, processingTimeMs: 0 },
+              sample: [],
+            });
+            setBdStatus('failed');
+            return false;
+          }
+
+          // Still pending, poll again
+          return await poll();
+        } catch {
+          return await poll();
+        }
+      };
+
+      await poll();
+    } catch (e) {
+      setBdResult({
+        message: 'Network error',
+        url: customUrl,
+        collectorId: '',
+        succeeded: false,
+        stats: { totalFound: 0, inserted: 0, skipped: 0, highRisk: 0, healingEvents: 0, processingTimeMs: 0 },
+        sample: [],
+      });
+      setBdStatus('failed');
+    } finally {
+      setBdScraping(false);
+    }
+  };
+
+  const runHeal = async () => {
+    if (!healDesc.trim()) return;
+    setHealing(true);
+    try {
+      await fetch('/api/scraper/brightdata/heal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          collectorId: process.env.NEXT_PUBLIC_BRIGHT_DATA_COLLECTOR_ID || 'c_mt2zxzmn1hc5ekd0hr',
+          description: healDesc.trim(),
+          url: customUrl.trim(),
+        }),
+      });
+      setHealDesc('');
+      setHealMode(false);
+      await fetchData();
+    } catch {
+      // silent
+    } finally {
+      setHealing(false);
     }
   };
 
@@ -198,6 +358,144 @@ export default function ScraperHealthPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Bright Data Scraper Studio */}
+      <Card className="border-blue-500/30">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Database className="h-4 w-4 text-blue-500" />
+            Bright Data Scraper Studio
+            <span className="text-xs bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded ml-auto">
+              Collector: c_mt2zxzmn1hc5ekd0hr
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-4">
+            Use Bright Data&apos;s AI-powered scraper with self-healing. Powered by Scraper Studio.
+          </p>
+          <div className="flex gap-2">
+            <Button
+              onClick={runBrightDataScrape}
+              disabled={!customUrl.trim() || bdScraping}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {bdStatus === 'triggering' ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Triggering scraper...
+                </>
+              ) : bdStatus === 'polling' ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Scraping in progress...
+                </>
+              ) : bdScraping ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Database className="h-4 w-4 mr-2" />
+                  Scrape with Bright Data
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={() => setHealMode(!healMode)}
+              variant="outline"
+              disabled={bdScraping}
+            >
+              <Zap className="h-4 w-4 mr-2" />
+              Self-Heal
+            </Button>
+          </div>
+
+          {bdStatus === 'polling' && (
+            <div className="mt-3 p-3 rounded-lg bg-blue-500/10 text-blue-400 text-sm">
+              <Loader2 className="h-4 w-4 mr-2 animate-spin inline" />
+              Scraper is running... This may take 5-15 minutes. Results will appear automatically.
+            </div>
+          )}
+
+          {healMode && (
+            <div className="mt-3 flex gap-2">
+              <Input
+                placeholder="Describe what broke (e.g., 'job title field returns null since site redesign')"
+                value={healDesc}
+                onChange={(e) => setHealDesc(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && runHeal()}
+                disabled={healing}
+                className="flex-1"
+              />
+              <Button
+                onClick={runHeal}
+                disabled={!healDesc.trim() || healing}
+                variant="destructive"
+              >
+                {healing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  'Heal'
+                )}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Bright Data Result */}
+      {bdResult && (
+        <Card className={bdResult.succeeded ? 'border-blue-500/30' : 'border-red-500/30'}>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              {bdResult.succeeded ? (
+                <CheckCircle2 className="h-4 w-4 text-blue-500" />
+              ) : (
+                <XCircle className="h-4 w-4 text-red-500" />
+              )}
+              {bdResult.succeeded ? 'Bright Data Scrape Succeeded' : 'Bright Data Scrape Failed'}
+              <span className="text-xs text-muted-foreground ml-auto">
+                {bdResult.stats.processingTimeMs}ms
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="text-center p-2 rounded-lg bg-muted/50">
+                <div className="text-lg font-bold">{bdResult.stats.totalFound}</div>
+                <div className="text-xs text-muted-foreground">Found</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-muted/50">
+                <div className="text-lg font-bold text-blue-500">{bdResult.stats.inserted}</div>
+                <div className="text-xs text-muted-foreground">Inserted</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-muted/50">
+                <div className="text-lg font-bold text-amber-500">{bdResult.stats.healingEvents}</div>
+                <div className="text-xs text-muted-foreground">Heal Events</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-muted/50">
+                <div className="text-lg font-bold font-mono text-xs">{bdResult.collectorId}</div>
+                <div className="text-xs text-muted-foreground">Collector ID</div>
+              </div>
+            </div>
+            {bdResult.sample.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-2">Sample Extracted</h4>
+                <div className="space-y-1">
+                  {bdResult.sample.map((item, i) => (
+                    <div key={i} className="text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground">{item.title}</span>
+                      {item.company !== 'Unknown' && <> @ {item.company}</>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Scrape Result */}
       {lastResult && (
