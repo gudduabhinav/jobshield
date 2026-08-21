@@ -1,8 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { scrapeUrl } from '@/lib/scraper/generic-scraper';
+import { scrapeWithSelfHealing } from '@/lib/scraper/self-healing-scraper';
 import { calculateRiskScore } from '@/lib/risk-engine/scoring';
 import { RiskLevel } from '@/types/jobs';
+
+interface ScrapeItem {
+  title: string;
+  company: string;
+  location: string;
+  description: string;
+  url: string;
+  salary: string | null;
+  tags: string[];
+}
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -15,54 +25,98 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'URL is required' }, { status: 400 });
     }
 
-    console.log(`[Custom Scrape] Starting scrape of: ${url}`);
-    const result = await scrapeUrl(url);
-    console.log(`[Custom Scrape] Found ${result.jobs.length} jobs using ${result.method} method`);
+    let hostname: string;
+    try {
+      hostname = new URL(url).hostname;
+    } catch {
+      hostname = 'unknown';
+    }
 
-    const runId = `custom-${Date.now()}`;
+    console.log(`[Self-Heal] Starting: ${url}`);
+
+    const scrapeResult = await scrapeWithSelfHealing(url) as Awaited<ReturnType<typeof scrapeWithSelfHealing>> & { items?: ScrapeItem[] };
+    const items = scrapeResult.items ?? [];
+
+    console.log(`[Self-Heal] ${items.length} items via ${scrapeResult.finalMethod} (healed: ${scrapeResult.healingEvents.length} events)`);
+
+    // Log scraper run
+    const runId = `selfheal-${Date.now()}`;
     await db.from('scraper_runs').insert({
       id: runId,
-      collector_id: `custom-${new URL(result.url).hostname}`,
-      status: 'running',
-      started_at: new Date().toISOString(),
-      records_found: result.jobs.length,
+      collector_id: `custom-${hostname}`,
+      status: scrapeResult.succeeded ? 'completed' : 'failed',
+      started_at: scrapeResult.scrapedAt,
+      completed_at: new Date().toISOString(),
+      records_found: items.length,
       valid_records: 0,
       invalid_records: 0,
       extraction_quality: 0,
     });
 
+    if (!scrapeResult.succeeded) {
+      const processingTimeMs = Date.now() - startTime;
+      return NextResponse.json({
+        message: `Failed to scrape ${url} — all strategies exhausted`,
+        url,
+        pageTitle: scrapeResult.pageTitle,
+        method: scrapeResult.finalMethod,
+        succeeded: false,
+        stats: {
+          totalFound: 0,
+          inserted: 0,
+          skipped: 0,
+          highRisk: 0,
+          healingEvents: scrapeResult.healingEvents.length,
+          strategiesAttempted: scrapeResult.attempts.length,
+          processingTimeMs,
+        },
+        attempts: scrapeResult.attempts.map(a => ({
+          method: a.method,
+          strategy: a.strategy,
+          success: a.success,
+          error: a.error,
+          durationMs: a.durationMs,
+        })),
+        healingEvents: scrapeResult.healingEvents,
+      }, { status: 200 });
+    }
+
+    // Score + insert each item
     let insertedCount = 0;
     let skippedCount = 0;
+    let highRiskCount = 0;
 
-    for (const job of result.jobs) {
-      if (!job.title || job.title.length < 2) {
+    for (const item of items) {
+      if (!item.title || item.title.length < 2) {
         skippedCount++;
         continue;
       }
 
       const risk = calculateRiskScore({
-        title: job.title,
-        companyName: job.company,
-        description: job.description,
-        applicationUrl: job.url || result.url,
+        title: item.title,
+        companyName: item.company,
+        description: item.description,
+        applicationUrl: item.url || url,
         companyUrl: null,
-        salary: job.salary,
+        salary: item.salary,
         isReposted: false,
         duplicateGroupId: null,
       });
 
-      const jobId = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${insertedCount}`;
+      if (risk.level === 'HIGH') highRiskCount++;
+
+      const jobId = `selfheal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${insertedCount}`;
 
       const { error: insertError } = await db.from('jobs').insert({
         id: jobId,
-        title: job.title,
-        company_name: job.company,
-        location: job.location,
-        description: job.description.substring(0, 2000),
-        application_url: job.url || result.url,
-        source_name: new URL(result.url).hostname,
-        skills: job.tags.slice(0, 20),
-        salary: job.salary,
+        title: item.title,
+        company_name: item.company,
+        location: item.location,
+        description: item.description.substring(0, 2000),
+        application_url: item.url || url,
+        source_name: hostname,
+        skills: item.tags.slice(0, 20),
+        salary: item.salary,
         posted_date: null,
         scraped_at: new Date().toISOString(),
         risk_score: risk.score,
@@ -77,51 +131,96 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const processingTimeMs = Date.now() - startTime;
-    const highRiskCount = result.jobs.filter((_, i) => {
-      const risk = calculateRiskScore({
-        title: result.jobs[i].title,
-        companyName: result.jobs[i].company,
-        description: result.jobs[i].description,
-        applicationUrl: result.jobs[i].url || result.url,
-        companyUrl: null,
-        salary: result.jobs[i].salary,
-        isReposted: false,
-        duplicateGroupId: null,
-      });
-      return risk.level === 'HIGH';
-    }).length;
-
+    // Update scraper run
     await db.from('scraper_runs').update({
       status: 'completed',
       completed_at: new Date().toISOString(),
       valid_records: insertedCount,
       invalid_records: skippedCount,
-      extraction_quality: result.jobs.length > 0 ? Math.round((insertedCount / result.jobs.length) * 100) : 0,
+      extraction_quality: items.length > 0 ? Math.round((insertedCount / items.length) * 100) : 0,
     }).eq('id', runId);
 
-    console.log(`[Custom Scrape] Complete: ${insertedCount} inserted, ${skippedCount} skipped in ${processingTimeMs}ms`);
+    // Update scraper health
+    const existingHealth = await db.from('scraper_health')
+      .select('id, total_runs, successful_runs, failed_runs, last_run_at')
+      .eq('collector_id', `custom-${hostname}`)
+      .single();
+
+    if (existingHealth.data) {
+      const h = existingHealth.data;
+      const newTotal = (h.total_runs || 0) + 1;
+      const newSuccessful = (h.successful_runs || 0) + 1;
+      const healthScore = Math.round((newSuccessful / newTotal) * 100);
+
+      await db.from('scraper_health').update({
+        total_runs: newTotal,
+        successful_runs: newSuccessful,
+        failed_runs: h.failed_runs || 0,
+        health_score: healthScore,
+        last_run_at: new Date().toISOString(),
+        last_status: 'healthy',
+        next_scheduled_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        field_completeness: {
+          applicationUrl: { completeness: 100, isTracked: true },
+          title: { completeness: 100, isTracked: true },
+          company: { completeness: 100, isTracked: true },
+        },
+      }).eq('collector_id', `custom-${hostname}`);
+    } else {
+      await db.from('scraper_health').insert({
+        id: `health-${hostname}-${Date.now()}`,
+        collector_id: `custom-${hostname}`,
+        collector_type: 'custom',
+        health_score: 100,
+        status: 'healthy',
+        last_run_at: new Date().toISOString(),
+        last_status: 'healthy',
+        total_runs: 1,
+        successful_runs: 1,
+        failed_runs: 0,
+        next_scheduled_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        field_completeness: {
+          applicationUrl: { completeness: 100, isTracked: true },
+          title: { completeness: 100, isTracked: true },
+          company: { completeness: 100, isTracked: true },
+        },
+      });
+    }
+
+    const processingTimeMs = Date.now() - startTime;
+    console.log(`[Self-Heal] Done: ${insertedCount} inserted, ${skippedCount} skipped, ${processingTimeMs}ms`);
 
     return NextResponse.json({
-      message: `Scraped ${result.jobs.length} items from ${result.url}`,
-      url: result.url,
-      pageTitle: result.title,
-      method: result.method,
+      message: `Scraped ${items.length} items from ${url}`,
+      url,
+      pageTitle: scrapeResult.pageTitle,
+      method: scrapeResult.finalMethod,
+      succeeded: true,
       stats: {
-        totalFound: result.jobs.length,
+        totalFound: items.length,
         inserted: insertedCount,
         skipped: skippedCount,
         highRisk: highRiskCount,
+        healingEvents: scrapeResult.healingEvents.length,
+        strategiesAttempted: scrapeResult.attempts.length,
         processingTimeMs,
       },
-      sample: result.jobs.slice(0, 5).map(j => ({
+      attempts: scrapeResult.attempts.map(a => ({
+        method: a.method,
+        strategy: a.strategy,
+        success: a.success,
+        error: a.error,
+        durationMs: a.durationMs,
+      })),
+      healingEvents: scrapeResult.healingEvents,
+      sample: items.slice(0, 5).map(j => ({
         title: j.title,
         company: j.company,
         location: j.location,
       })),
     });
   } catch (error) {
-    console.error('[Custom Scrape] Error:', error);
+    console.error('[Self-Heal] Error:', error);
     return NextResponse.json(
       {
         error: 'Scrape failed',

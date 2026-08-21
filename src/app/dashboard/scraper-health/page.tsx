@@ -6,9 +6,48 @@ import { ScraperStatusBadge } from '@/components/dashboard/scraper-status-badge'
 import { ScraperHealth, ScraperRun } from '@/types/scraper';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
-import { Activity, Clock, BarChart3, RefreshCw, Loader2, Globe } from 'lucide-react';
+import { Activity, Clock, BarChart3, RefreshCw, Loader2, Globe, Shield, Zap, AlertTriangle, CheckCircle2, XCircle, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+
+interface AttemptInfo {
+  method: string;
+  strategy: string;
+  success: boolean;
+  error: string | null;
+  durationMs: number;
+}
+
+interface HealingInfo {
+  id: string;
+  url: string;
+  phase: string;
+  strategy: string;
+  success: boolean;
+  errorBefore: string;
+  errorAfter: string | null;
+  itemsFound: number;
+  timestamp: string;
+}
+
+interface ScrapeResult {
+  url: string;
+  pageTitle: string;
+  method: string;
+  succeeded: boolean;
+  stats: {
+    totalFound: number;
+    inserted: number;
+    skipped: number;
+    highRisk: number;
+    healingEvents: number;
+    strategiesAttempted: number;
+    processingTimeMs: number;
+  };
+  attempts: AttemptInfo[];
+  healingEvents: HealingInfo[];
+  sample: Array<{ title: string; company: string; location: string }>;
+}
 
 export default function ScraperHealthPage() {
   const [health, setHealth] = useState<ScraperHealth | null>(null);
@@ -16,7 +55,7 @@ export default function ScraperHealthPage() {
   const [loading, setLoading] = useState(true);
   const [customUrl, setCustomUrl] = useState('');
   const [scraping, setScraping] = useState(false);
-  const [lastResult, setLastResult] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<ScrapeResult | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -49,14 +88,19 @@ export default function ScraperHealthPage() {
         body: JSON.stringify({ url: customUrl.trim() }),
       });
       const data = await res.json();
-      if (res.ok) {
-        setLastResult(`Found ${data.stats.totalFound} items from ${data.pageTitle} using ${data.method}. Inserted ${data.stats.inserted}. High risk: ${data.stats.highRisk}`);
-        await fetchData();
-      } else {
-        setLastResult(`Error: ${data.error} — ${data.details || ''}`);
-      }
+      setLastResult(data);
+      await fetchData();
     } catch (e) {
-      setLastResult(`Network error: ${e instanceof Error ? e.message : 'Unknown'}`);
+      setLastResult({
+        url: customUrl,
+        pageTitle: '',
+        method: 'none',
+        succeeded: false,
+        stats: { totalFound: 0, inserted: 0, skipped: 0, highRisk: 0, healingEvents: 0, strategiesAttempted: 0, processingTimeMs: 0 },
+        attempts: [],
+        healingEvents: [],
+        sample: [],
+      });
     } finally {
       setScraping(false);
     }
@@ -92,7 +136,7 @@ export default function ScraperHealthPage() {
             Scraper Control
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Enter any public URL to scrape and extract data
+            Enter any URL — scraper self-heals through multiple strategies
           </p>
         </div>
         <Button onClick={fetchData} variant="outline" size="sm" disabled={loading || scraping}>
@@ -111,7 +155,7 @@ export default function ScraperHealthPage() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-4">
-            Paste any public URL — the scraper fetches the page, extracts content, scores risk, and stores results in the database.
+            Paste any URL — the scraper tries multiple fetch strategies and extraction methods, self-healing when one fails.
           </p>
           <div className="flex gap-2">
             <Input
@@ -134,20 +178,15 @@ export default function ScraperHealthPage() {
                 </>
               ) : (
                 <>
-                  <Globe className="h-4 w-4 mr-2" />
+                  <Shield className="h-4 w-4 mr-2" />
                   Scrape
                 </>
               )}
             </Button>
           </div>
-          {lastResult && (
-            <div className={`mt-3 p-3 rounded-lg text-sm ${lastResult.startsWith('Error') ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
-              {lastResult}
-            </div>
-          )}
           <div className="mt-3 flex flex-wrap gap-2">
             <span className="text-xs text-muted-foreground">Try:</span>
-            {['builtin.com/jobs', 'remoteok.com', 'arbeitnow.com', 'wellfound.com'].map(suggestion => (
+            {['builtin.com/jobs', 'remoteok.com', 'wellfound.com', 'ycombinator.com/companies'].map(suggestion => (
               <button
                 key={suggestion}
                 onClick={() => setCustomUrl(`https://${suggestion}`)}
@@ -159,6 +198,124 @@ export default function ScraperHealthPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Scrape Result */}
+      {lastResult && (
+        <Card className={lastResult.succeeded ? 'border-emerald-500/30' : 'border-red-500/30'}>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              {lastResult.succeeded ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              ) : (
+                <XCircle className="h-4 w-4 text-red-500" />
+              )}
+              {lastResult.succeeded ? 'Scrape Succeeded' : 'Scrape Failed'}
+              <span className="text-xs text-muted-foreground ml-auto">
+                {lastResult.stats.processingTimeMs}ms
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Stats row */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="text-center p-2 rounded-lg bg-muted/50">
+                <div className="text-lg font-bold">{lastResult.stats.totalFound}</div>
+                <div className="text-xs text-muted-foreground">Found</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-muted/50">
+                <div className="text-lg font-bold text-emerald-500">{lastResult.stats.inserted}</div>
+                <div className="text-xs text-muted-foreground">Inserted</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-muted/50">
+                <div className="text-lg font-bold text-amber-500">{lastResult.stats.healingEvents}</div>
+                <div className="text-xs text-muted-foreground">Heal Events</div>
+              </div>
+              <div className="text-center p-2 rounded-lg bg-muted/50">
+                <div className="text-lg font-bold">{lastResult.stats.strategiesAttempted}</div>
+                <div className="text-xs text-muted-foreground">Strategies</div>
+              </div>
+            </div>
+
+            {/* Strategy attempts timeline */}
+            {lastResult.attempts.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                  <Zap className="h-3 w-3" />
+                  Strategy Attempts
+                </h4>
+                <div className="space-y-2">
+                  {lastResult.attempts.map((attempt, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      {attempt.success ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                      ) : (
+                        <XCircle className="h-4 w-4 text-red-400 shrink-0" />
+                      )}
+                      <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">
+                        {attempt.method}
+                      </span>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {attempt.strategy}
+                      </span>
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        {attempt.durationMs}ms
+                      </span>
+                      {attempt.error && (
+                        <span className="text-xs text-red-400 truncate max-w-[200px]">
+                          {attempt.error}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Healing events */}
+            {lastResult.healingEvents.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                  <Activity className="h-3 w-3" />
+                  Healing Events
+                </h4>
+                <div className="space-y-1">
+                  {lastResult.healingEvents.map((ev, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs">
+                      {ev.success ? (
+                        <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
+                      )}
+                      <span className="text-muted-foreground">{ev.phase}</span>
+                      <span className="font-mono bg-muted px-1.5 py-0.5 rounded">{ev.strategy}</span>
+                      {ev.itemsFound > 0 && (
+                        <span className="text-emerald-500">{ev.itemsFound} items</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Sample items */}
+            {lastResult.sample.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium mb-2">Sample Extracted</h4>
+                <div className="space-y-1">
+                  {lastResult.sample.map((item, i) => (
+                    <div key={i} className="text-sm text-muted-foreground">
+                      <span className="font-medium text-foreground">{item.title}</span>
+                      {item.company !== 'Unknown' && <> @ {item.company}</>}
+                      {item.location !== 'Not specified' && <> · {item.location}</>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {health && (
         <>
