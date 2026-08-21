@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { ScraperStatusBadge } from '@/components/dashboard/scraper-status-badge';
 import { DashboardStats } from '@/types/scraper';
-import { Briefcase, Shield, AlertTriangle, Activity, HeartPulse, CheckCircle, Loader2 } from 'lucide-react';
+import { Briefcase, Shield, AlertTriangle, Activity, HeartPulse, CheckCircle, Globe } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import Link from 'next/link';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line,
@@ -24,42 +25,13 @@ function PieLabel({ name, value }: PieLabelProps) {
 
 export default function DashboardOverview() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [scraping, setScraping] = useState(false);
-  const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
-
-  const fetchStats = useCallback(async () => {
-    try {
-      const r = await fetch('/api/dashboard/stats');
-      const data = await r.json();
-      setStats(data);
-      return data;
-    } catch {
-      return null;
-    }
-  }, []);
 
   useEffect(() => {
-    fetchStats().then(async (data) => {
-      if (data && data.totalJobs === 0) {
-        setScraping(true);
-        setScrapeMessage('No jobs found — scraping live data from web sources...');
-        try {
-          const res = await fetch('/api/scraper/run', { method: 'POST' });
-          const result = await res.json();
-          if (res.ok) {
-            setScrapeMessage(`Scraped ${result.stats.inserted} real jobs from ${Object.keys(result.stats.bySource).length} sources`);
-            await fetchStats();
-          } else {
-            setScrapeMessage('Scrape failed — go to Scraper Health to run manually');
-          }
-        } catch {
-          setScrapeMessage('Could not reach scraper — check if server is running');
-        } finally {
-          setScraping(false);
-        }
-      }
-    });
-  }, [fetchStats]);
+    fetch('/api/dashboard/stats')
+      .then(r => r.json())
+      .then(setStats)
+      .catch(console.error);
+  }, []);
 
   if (!stats) {
     return (
@@ -74,69 +46,83 @@ export default function DashboardOverview() {
     );
   }
 
+  if (stats.totalJobs === 0) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Overview</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Real-time job intelligence from live scraping
+          </p>
+        </div>
+        <Card className="py-16">
+          <CardContent className="text-center">
+            <Globe className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h2 className="text-lg font-semibold mb-2">No data yet</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Go to the scraper and enter a public URL to start collecting data.
+            </p>
+            <Link
+              href="/dashboard/scraper-health"
+              className="inline-flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+            >
+              <Globe className="h-4 w-4" />
+              Open Scraper
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Overview</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Real-time job intelligence from live sources
+            Data from live scraping sessions
           </p>
         </div>
         <ScraperStatusBadge status={stats.scraperStatus} />
       </div>
 
-      {(scraping || scrapeMessage) && (
-        <Card className={scrapeMessage?.includes('Scraped') ? 'border-emerald-500/50' : scrapeMessage?.includes('fail') || scrapeMessage?.includes('Could not') ? 'border-red-500/50' : 'border-amber-500/50'}>
-          <CardContent className="py-3 flex items-center gap-3">
-            {scraping && <Loader2 className="h-4 w-4 animate-spin text-amber-500" />}
-            <p className={`text-sm ${
-              scrapeMessage?.includes('Scraped') ? 'text-emerald-400' :
-              scrapeMessage?.includes('fail') || scrapeMessage?.includes('Could not') ? 'text-red-400' :
-              'text-amber-400'
-            }`}>
-              {scrapeMessage}
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Total Jobs"
+          title="Total Items"
           value={stats.totalJobs.toLocaleString()}
           icon={Briefcase}
-          description="Jobs collected and analyzed"
+          description="Items scraped and analyzed"
         />
         <StatCard
           title="Low Risk"
           value={stats.lowRisk.toLocaleString()}
           icon={CheckCircle}
-          description="Jobs with clean signals"
+          description="Clean signals"
           iconClassName="text-emerald-500"
         />
         <StatCard
           title="Needs Verification"
           value={stats.mediumRisk.toLocaleString()}
           icon={AlertTriangle}
-          description="Jobs with some concerns"
+          description="Some concerns"
           iconClassName="text-amber-500"
         />
         <StatCard
-          title="High Risk Signals"
+          title="High Risk"
           value={stats.highRisk.toLocaleString()}
           icon={Shield}
-          description="Jobs with strong risk signals"
+          description="Strong risk signals"
           iconClassName="text-red-500"
         />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard
-          title="Last Successful Run"
+          title="Last Scrape"
           value={stats.lastSuccessfulRun ? new Date(stats.lastSuccessfulRun).toLocaleTimeString() : 'N/A'}
           icon={Activity}
-          description="Live scraper"
+          description="Most recent scrape"
         />
         <StatCard
           title="Healing Events"
@@ -156,7 +142,7 @@ export default function DashboardOverview() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Jobs Collected Over Time</CardTitle>
+            <CardTitle className="text-base">Items Collected</CardTitle>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={250}>
@@ -215,7 +201,7 @@ export default function DashboardOverview() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Scraper Extraction Quality</CardTitle>
+          <CardTitle className="text-base">Extraction Quality</CardTitle>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={250}>

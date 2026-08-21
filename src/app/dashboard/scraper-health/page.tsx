@@ -6,7 +6,7 @@ import { ScraperStatusBadge } from '@/components/dashboard/scraper-status-badge'
 import { ScraperHealth, ScraperRun } from '@/types/scraper';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
-import { Activity, Clock, BarChart3, Play, RefreshCw, Loader2, Globe, ArrowRight } from 'lucide-react';
+import { Activity, Clock, BarChart3, RefreshCw, Loader2, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -14,11 +14,9 @@ export default function ScraperHealthPage() {
   const [health, setHealth] = useState<ScraperHealth | null>(null);
   const [runs, setRuns] = useState<ScraperRun[]>([]);
   const [loading, setLoading] = useState(true);
+  const [customUrl, setCustomUrl] = useState('');
   const [scraping, setScraping] = useState(false);
   const [lastResult, setLastResult] = useState<string | null>(null);
-  const [customUrl, setCustomUrl] = useState('');
-  const [customScraping, setCustomScraping] = useState(false);
-  const [customResult, setCustomResult] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -40,29 +38,10 @@ export default function ScraperHealthPage() {
     fetchData();
   }, []);
 
-  const runScraper = async () => {
+  const runScrape = async () => {
+    if (!customUrl.trim()) return;
     setScraping(true);
     setLastResult(null);
-    try {
-      const res = await fetch('/api/scraper/run', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        setLastResult(`Scraped ${data.stats.totalFetched} jobs, inserted ${data.stats.inserted} (High: ${data.stats.riskBreakdown.high}, Medium: ${data.stats.riskBreakdown.medium}, Low: ${data.stats.riskBreakdown.low})`);
-        await fetchData();
-      } else {
-        setLastResult(`Error: ${data.error || 'Unknown error'}`);
-      }
-    } catch (e) {
-      setLastResult(`Network error: ${e instanceof Error ? e.message : 'Unknown'}`);
-    } finally {
-      setScraping(false);
-    }
-  };
-
-  const runCustomScrape = async () => {
-    if (!customUrl.trim()) return;
-    setCustomScraping(true);
-    setCustomResult(null);
     try {
       const res = await fetch('/api/scraper/custom', {
         method: 'POST',
@@ -71,22 +50,22 @@ export default function ScraperHealthPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setCustomResult(`Scraped ${data.pageTitle} — Found ${data.stats.totalFound} items using ${data.method} method. Inserted ${data.stats.inserted} into database. High risk: ${data.stats.highRisk}`);
+        setLastResult(`Found ${data.stats.totalFound} items from ${data.pageTitle} using ${data.method}. Inserted ${data.stats.inserted}. High risk: ${data.stats.highRisk}`);
         await fetchData();
       } else {
-        setCustomResult(`Error: ${data.error} — ${data.details || ''}`);
+        setLastResult(`Error: ${data.error} — ${data.details || ''}`);
       }
     } catch (e) {
-      setCustomResult(`Network error: ${e instanceof Error ? e.message : 'Unknown'}`);
+      setLastResult(`Network error: ${e instanceof Error ? e.message : 'Unknown'}`);
     } finally {
-      setCustomScraping(false);
+      setScraping(false);
     }
   };
 
   if (loading && !health) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Scraper Health</h1>
+        <h1 className="text-2xl font-bold">Scraper Control</h1>
         <div className="grid gap-4">
           {[1, 2, 3].map(i => <Card key={i} className="h-24 animate-pulse" />)}
         </div>
@@ -96,12 +75,12 @@ export default function ScraperHealthPage() {
 
   const fieldEntries = health ? Object.entries(health.fieldCompleteness) : [];
   const statusMessages: Record<string, string> = {
-    IDLE: 'Scraper has not run yet. Click a button below to start scraping.',
-    HEALTHY: 'The collector is operating normally. Data extraction is performing as expected.',
-    DEGRADED: 'The collector is experiencing some issues. Some fields may have reduced completeness.',
-    FAILED: 'The collector has failed. Data extraction is not producing valid results.',
+    IDLE: 'Enter a URL above and click Scrape to start collecting data.',
+    HEALTHY: 'Scraping is working. Data extraction is performing as expected.',
+    DEGRADED: 'The scraper experienced some issues. Some fields may have reduced completeness.',
+    FAILED: 'The scraper has failed. Check the URL and try again.',
     HEALING: 'Self-healing is in progress. The system is attempting to recover.',
-    RECOVERED: 'The collector has recovered from a failure. Extraction quality is being monitored.',
+    RECOVERED: 'The scraper recovered from a failure. Extraction quality is being monitored.',
   };
 
   return (
@@ -113,91 +92,39 @@ export default function ScraperHealthPage() {
             Scraper Control
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Scrape any public website or fetch jobs from live sources
+            Enter any public URL to scrape and extract data
           </p>
         </div>
-        <Button onClick={fetchData} variant="outline" size="sm" disabled={loading || scraping || customScraping}>
+        <Button onClick={fetchData} variant="outline" size="sm" disabled={loading || scraping}>
           <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </div>
 
-      {/* Custom URL Scraper */}
+      {/* URL Input */}
       <Card className="border-emerald-500/30">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <Globe className="h-4 w-4 text-emerald-500" />
-            Scrape Any Public Website
+            Scrape a Public Website
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-4">
-            Enter any public URL — the scraper will fetch the page, extract job listings, score risk, and store in database.
+            Paste any public URL — the scraper fetches the page, extracts content, scores risk, and stores results in the database.
           </p>
           <div className="flex gap-2">
             <Input
-              placeholder="https://example.com/jobs  or  greenhouse.io/jobs or linkedin.com/jobs/..."
+              placeholder="https://example.com/jobs"
               value={customUrl}
               onChange={(e) => setCustomUrl(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && runCustomScrape()}
-              disabled={customScraping}
+              onKeyDown={(e) => e.key === 'Enter' && runScrape()}
+              disabled={scraping}
               className="flex-1"
             />
             <Button
-              onClick={runCustomScrape}
-              disabled={!customUrl.trim() || customScraping}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              {customScraping ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Scraping...
-                </>
-              ) : (
-                <>
-                  <Globe className="h-4 w-4 mr-2" />
-                  Scrape URL
-                </>
-              )}
-            </Button>
-          </div>
-          {customResult && (
-            <div className={`mt-3 p-3 rounded-lg text-sm ${customResult.startsWith('Error') ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
-              {customResult}
-            </div>
-          )}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <span className="text-xs text-muted-foreground">Try:</span>
-            {['boards.greenhouse.io', 'jobs.lever.co', 'builtin.com/jobs', 'wellfound.com/roles'].map(suggestion => (
-              <button
-                key={suggestion}
-                onClick={() => setCustomUrl(`https://${suggestion}`)}
-                className="text-xs text-emerald-500 hover:text-emerald-400 underline underline-offset-2"
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Bulk Live Sources */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Play className="h-4 w-4 text-emerald-500" />
-            Bulk Scrape — All Sources
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm">Fetch jobs from RemoteOK, Remotive, and Arbeitnow in one click.</p>
-              <p className="text-xs text-muted-foreground mt-1">~200 real jobs from 3 live sources</p>
-            </div>
-            <Button
-              onClick={runScraper}
-              disabled={scraping || customScraping}
+              onClick={runScrape}
+              disabled={!customUrl.trim() || scraping}
               className="bg-emerald-600 hover:bg-emerald-700"
             >
               {scraping ? (
@@ -207,8 +134,8 @@ export default function ScraperHealthPage() {
                 </>
               ) : (
                 <>
-                  <Play className="h-4 w-4 mr-2" />
-                  Run Bulk Scrape
+                  <Globe className="h-4 w-4 mr-2" />
+                  Scrape
                 </>
               )}
             </Button>
@@ -218,6 +145,18 @@ export default function ScraperHealthPage() {
               {lastResult}
             </div>
           )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="text-xs text-muted-foreground">Try:</span>
+            {['builtin.com/jobs', 'remoteok.com', 'arbeitnow.com', 'wellfound.com'].map(suggestion => (
+              <button
+                key={suggestion}
+                onClick={() => setCustomUrl(`https://${suggestion}`)}
+                className="text-xs text-emerald-500 hover:text-emerald-400 underline underline-offset-2"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
@@ -237,7 +176,7 @@ export default function ScraperHealthPage() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground">Records</CardTitle>
+                <CardTitle className="text-sm text-muted-foreground">Total Scraped</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{health.totalRecordsExtracted.toLocaleString()}</div>
@@ -254,17 +193,10 @@ export default function ScraperHealthPage() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm text-muted-foreground">Last Run</CardTitle>
+                <CardTitle className="text-sm text-muted-foreground">Total Scrapes</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-sm font-medium">
-                  {health.lastSuccessfulRun
-                    ? `${Math.round((Date.now() - new Date(health.lastSuccessfulRun).getTime()) / 60000)} minutes ago`
-                    : 'N/A'}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  Recovery Rate: {health.recoveryRate}%
-                </div>
+                <div className="text-2xl font-bold">{runs.length}</div>
               </CardContent>
             </Card>
           </div>
@@ -315,13 +247,13 @@ export default function ScraperHealthPage() {
         <CardContent>
           {runs.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-4">
-              No runs yet. Scrape a URL or run the bulk scraper above.
+              No scrape history yet. Enter a URL above to start.
             </p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Source</TableHead>
+                  <TableHead>Website</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="hidden md:table-cell">Records</TableHead>
                   <TableHead className="hidden md:table-cell">Quality</TableHead>
