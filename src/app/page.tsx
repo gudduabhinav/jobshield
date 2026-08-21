@@ -9,8 +9,6 @@ import {
   Repeat,
   Search,
   Zap,
-  CheckCircle,
-  Eye,
   Lock,
 } from "lucide-react";
 
@@ -36,18 +34,11 @@ const FEATURES = [
 ];
 
 const PIPELINE_STEPS = [
-  { icon: Search, label: "Public Web Data" },
+  { icon: Search, label: "Live Web Scraping" },
   { icon: Zap, label: "Bright Data Scraper" },
-  { icon: Eye, label: "Validation" },
+  { icon: Activity, label: "Validation" },
   { icon: HeartPulse, label: "Self-Healing" },
-  { icon: Shield, label: "Job Intelligence" },
-];
-
-const STATS = [
-  { value: "1,284", label: "Jobs Analyzed", color: "text-emerald-400" },
-  { value: "120", label: "High Risk Detected", color: "text-red-400" },
-  { value: "97.8%", label: "Extraction Quality", color: "text-emerald-400" },
-  { value: "100%", label: "Recovery Rate", color: "text-blue-400" },
+  { icon: Shield, label: "Risk Analysis" },
 ];
 
 export default function HomePage() {
@@ -63,12 +54,6 @@ export default function HomePage() {
             <span className="text-lg font-bold tracking-tight">JobShield</span>
           </Link>
           <nav className="flex items-center gap-6">
-            <Link
-              href="/demo"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Demo
-            </Link>
             <Link
               href="/dashboard"
               className="text-sm bg-emerald-500 text-white px-4 py-2 rounded-lg hover:bg-emerald-600 transition-colors font-medium"
@@ -86,7 +71,7 @@ export default function HomePage() {
           <div className="relative max-w-6xl mx-auto px-6 pt-24 pb-20 text-center">
             <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-4 py-1.5 text-sm text-emerald-500 mb-8">
               <Activity className="h-3.5 w-3.5" />
-              Powered by Bright Data Scraper Studio
+              Live data from RemoteOK, Remotive &amp; Arbeitnow
             </div>
 
             <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight mb-6 leading-[1.1]">
@@ -95,11 +80,11 @@ export default function HomePage() {
             </h1>
 
             <p className="text-xl sm:text-2xl text-muted-foreground max-w-2xl mx-auto mb-3 leading-relaxed">
-              Find suspicious job postings before they waste your time.
+              Real-time job scam detection powered by live web scraping.
             </p>
             <p className="text-base text-muted-foreground/70 max-w-xl mx-auto mb-12">
-              A self-healing job intelligence platform powered by real-time web
-              data. When websites change, our scraper adapts automatically.
+              Scrapes real job postings from multiple sources, runs risk
+              analysis, and flags suspicious listings — all live, no fake data.
             </p>
 
             <div className="flex items-center justify-center gap-4">
@@ -107,33 +92,17 @@ export default function HomePage() {
                 href="/dashboard/jobs"
                 className="bg-emerald-500 text-white px-7 py-3 rounded-lg font-medium hover:bg-emerald-600 transition-all inline-flex items-center gap-2 text-sm shadow-lg shadow-emerald-500/20"
               >
-                Explore Jobs
+                View Live Jobs
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
-                href="/demo"
+                href="/dashboard/scraper-health"
                 className="border border-border px-7 py-3 rounded-lg font-medium hover:bg-muted transition-all inline-flex items-center gap-2 text-sm"
               >
-                Watch Demo
-                <Activity className="h-4 w-4" />
+                Run Scraper
+                <Zap className="h-4 w-4" />
               </Link>
             </div>
-          </div>
-        </section>
-
-        {/* Stats Bar */}
-        <section className="border-y border-border/50">
-          <div className="max-w-6xl mx-auto px-6 py-10 grid grid-cols-2 md:grid-cols-4 gap-8">
-            {STATS.map((stat) => (
-              <div key={stat.label} className="text-center">
-                <div className={`text-3xl sm:text-4xl font-bold ${stat.color}`}>
-                  {stat.value}
-                </div>
-                <div className="text-sm text-muted-foreground mt-2">
-                  {stat.label}
-                </div>
-              </div>
-            ))}
           </div>
         </section>
 
@@ -141,11 +110,10 @@ export default function HomePage() {
         <section className="max-w-6xl mx-auto px-6 py-24">
           <div className="text-center mb-16">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">
-              Intelligence Platform Features
+              What JobShield Does
             </h2>
             <p className="text-muted-foreground max-w-lg mx-auto">
-              Built to protect job seekers with real-time analysis and
-              resilient data collection
+              Scrapes real jobs, scores risk, detects scams — all automated
             </p>
           </div>
           <div className="grid md:grid-cols-3 gap-6">
@@ -174,7 +142,7 @@ export default function HomePage() {
                 How It Works
               </h2>
               <p className="text-muted-foreground max-w-lg mx-auto">
-                The complete data pipeline from web to intelligence
+                From live web scraping to risk intelligence in one click
               </p>
             </div>
 
@@ -194,6 +162,16 @@ export default function HomePage() {
                   )}
                 </div>
               ))}
+            </div>
+
+            <div className="text-center mt-12">
+              <Link
+                href="/dashboard/scraper-health"
+                className="inline-flex items-center gap-2 text-sm text-emerald-500 hover:text-emerald-400 font-medium transition-colors"
+              >
+                Try it now — run the live scraper
+                <ArrowRight className="h-4 w-4" />
+              </Link>
             </div>
           </div>
         </section>
@@ -216,47 +194,34 @@ export default function HomePage() {
                   <br />
                   The data kept flowing.
                 </h2>
-                <p className="text-muted-foreground leading-relaxed mb-6">
+                <p className="text-muted-foreground leading-relaxed">
                   When target websites change their HTML structure, JobShield
                   detects the extraction failure, triggers Bright Data&apos;s
                   self-healing workflow, and recovers structured data without
                   manual intervention.
                 </p>
-                <Link
-                  href="/demo"
-                  className="inline-flex items-center gap-2 text-sm text-emerald-500 hover:text-emerald-400 font-medium transition-colors"
-                >
-                  Watch the demo
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
               </div>
               <div className="bg-background rounded-xl border border-border/50 p-6 space-y-4">
                 <div className="flex items-center gap-3">
-                  <CheckCircle className="h-4 w-4 text-emerald-500" />
-                  <span className="text-sm">Scraper healthy — 1,284 records</span>
+                  <Activity className="h-4 w-4 text-emerald-500" />
+                  <span className="text-sm">Live scraping from 3 sources</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <AlertTriangle className="h-4 w-4 text-red-500" />
-                  <span className="text-sm">
-                    Extraction failed — layout changed
-                  </span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Activity className="h-4 w-4 text-amber-500" />
-                  <span className="text-sm">Validation detected anomalies</span>
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  <span className="text-sm">Risk scoring on every job</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <Zap className="h-4 w-4 text-blue-500" />
-                  <span className="text-sm">Self-healing initiated</span>
+                  <span className="text-sm">Self-healing when extraction fails</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <Repeat className="h-4 w-4 text-violet-500" />
-                  <span className="text-sm">Extraction repaired</span>
+                  <span className="text-sm">Duplicate detection across sources</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <CheckCircle className="h-4 w-4 text-emerald-500" />
+                  <Shield className="h-4 w-4 text-emerald-500" />
                   <span className="text-sm font-medium">
-                    1,284 records recovered — 97.8% quality
+                    All data stored in real-time
                   </span>
                 </div>
               </div>

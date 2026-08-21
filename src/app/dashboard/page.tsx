@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { StatCard } from '@/components/dashboard/stat-card';
 import { ScraperStatusBadge } from '@/components/dashboard/scraper-status-badge';
 import { DashboardStats } from '@/types/scraper';
-import { Briefcase, Shield, AlertTriangle, Activity, HeartPulse, CheckCircle } from 'lucide-react';
+import { Briefcase, Shield, AlertTriangle, Activity, HeartPulse, CheckCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -24,13 +24,42 @@ function PieLabel({ name, value }: PieLabelProps) {
 
 export default function DashboardOverview() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [scraping, setScraping] = useState(false);
+  const [scrapeMessage, setScrapeMessage] = useState<string | null>(null);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const r = await fetch('/api/dashboard/stats');
+      const data = await r.json();
+      setStats(data);
+      return data;
+    } catch {
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
-    fetch('/api/dashboard/stats')
-      .then(r => r.json())
-      .then(setStats)
-      .catch(console.error);
-  }, []);
+    fetchStats().then(async (data) => {
+      if (data && data.totalJobs === 0) {
+        setScraping(true);
+        setScrapeMessage('No jobs found — scraping live data from web sources...');
+        try {
+          const res = await fetch('/api/scraper/run', { method: 'POST' });
+          const result = await res.json();
+          if (res.ok) {
+            setScrapeMessage(`Scraped ${result.stats.inserted} real jobs from ${Object.keys(result.stats.bySource).length} sources`);
+            await fetchStats();
+          } else {
+            setScrapeMessage('Scrape failed — go to Scraper Health to run manually');
+          }
+        } catch {
+          setScrapeMessage('Could not reach scraper — check if server is running');
+        } finally {
+          setScraping(false);
+        }
+      }
+    });
+  }, [fetchStats]);
 
   if (!stats) {
     return (
@@ -51,11 +80,26 @@ export default function DashboardOverview() {
         <div>
           <h1 className="text-2xl font-bold">Overview</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Real-time job intelligence dashboard
+            Real-time job intelligence from live sources
           </p>
         </div>
         <ScraperStatusBadge status={stats.scraperStatus} />
       </div>
+
+      {(scraping || scrapeMessage) && (
+        <Card className={scrapeMessage?.includes('Scraped') ? 'border-emerald-500/50' : scrapeMessage?.includes('fail') || scrapeMessage?.includes('Could not') ? 'border-red-500/50' : 'border-amber-500/50'}>
+          <CardContent className="py-3 flex items-center gap-3">
+            {scraping && <Loader2 className="h-4 w-4 animate-spin text-amber-500" />}
+            <p className={`text-sm ${
+              scrapeMessage?.includes('Scraped') ? 'text-emerald-400' :
+              scrapeMessage?.includes('fail') || scrapeMessage?.includes('Could not') ? 'text-red-400' :
+              'text-amber-400'
+            }`}>
+              {scrapeMessage}
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
@@ -92,7 +136,7 @@ export default function DashboardOverview() {
           title="Last Successful Run"
           value={stats.lastSuccessfulRun ? new Date(stats.lastSuccessfulRun).toLocaleTimeString() : 'N/A'}
           icon={Activity}
-          description="Bright Data collector"
+          description="Live scraper"
         />
         <StatCard
           title="Healing Events"
